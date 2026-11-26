@@ -1,153 +1,229 @@
 import streamlit as st
+import math
 
-st.set_page_config(page_title="オセロ", page_icon="⚫", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="オセロ", page_icon="⚫", layout="centered")
 
-SIZE = 8
-EMPTY, BLACK, WHITE = 0, 1, 2
-NAMES = {BLACK: "黒", WHITE: "白"}
-GLYPHS = {EMPTY: "", BLACK: "●", WHITE: "○"}
-DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
+# ---------- Game engine ----------
+N = 8
+DIRECTIONS = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+WEIGHTS = [
+    [100,-20,10,5,5,10,-20,100],
+    [-20,-50,-2,-2,-2,-2,-50,-20],
+    [10,-2,5,1,1,5,-2,10],
+    [5,-2,1,0,0,1,-2,5],
+    [5,-2,1,0,0,1,-2,5],
+    [10,-2,5,1,1,5,-2,10],
+    [-20,-50,-2,-2,-2,-2,-50,-20],
+    [100,-20,10,5,5,10,-20,100],
+]
 
-
-def new_board():
-    board = [[EMPTY for _ in range(SIZE)] for _ in range(SIZE)]
-    board[3][3], board[3][4] = WHITE, BLACK
-    board[4][3], board[4][4] = BLACK, WHITE
-    return board
-
+def initial_board():
+    b = [[0]*8 for _ in range(8)]
+    b[3][3] = b[4][4] = 2
+    b[3][4] = b[4][3] = 1
+    return b
 
 def flips_for(board, r, c, player):
-    if board[r][c] != EMPTY:
+    if board[r][c] != 0:
         return []
-    opponent = WHITE if player == BLACK else BLACK
+    other = 3-player
     flips = []
     for dr, dc in DIRECTIONS:
-        line = []
-        rr, cc = r + dr, c + dc
-        while 0 <= rr < SIZE and 0 <= cc < SIZE and board[rr][cc] == opponent:
-            line.append((rr, cc))
-            rr += dr
-            cc += dc
-        if line and 0 <= rr < SIZE and 0 <= cc < SIZE and board[rr][cc] == player:
+        line=[]; rr=r+dr; cc=c+dc
+        while 0 <= rr < 8 and 0 <= cc < 8 and board[rr][cc] == other:
+            line.append((rr,cc)); rr += dr; cc += dc
+        if line and 0 <= rr < 8 and 0 <= cc < 8 and board[rr][cc] == player:
             flips.extend(line)
     return flips
 
-
 def legal_moves(board, player):
-    return [(r, c) for r in range(SIZE) for c in range(SIZE) if flips_for(board, r, c, player)]
+    return [(r,c) for r in range(8) for c in range(8) if flips_for(board,r,c,player)]
 
+def play(board, r, c, player):
+    flips = flips_for(board,r,c,player)
+    if not flips:
+        return None
+    b=[row[:] for row in board]
+    b[r][c]=player
+    for rr,cc in flips: b[rr][cc]=player
+    return b
 
-def count(board):
-    return (sum(cell == BLACK for row in board for cell in row),
-            sum(cell == WHITE for row in board for cell in row))
+def counts(board):
+    return sum(x==1 for row in board for x in row), sum(x==2 for row in board for x in row)
 
+def is_over(board):
+    return not legal_moves(board,1) and not legal_moves(board,2)
 
-def reset():
-    st.session_state.board = new_board()
-    st.session_state.turn = BLACK
-    st.session_state.message = "黒の番です。置ける場所（小さな点）を選んでね。"
-    st.session_state.finished = False
+def evaluate(board, player):
+    # Positional score, mobility, and disc difference (disc difference matters more late game).
+    opp=3-player
+    positional=sum(WEIGHTS[r][c] * (1 if board[r][c]==player else -1 if board[r][c]==opp else 0)
+                   for r in range(8) for c in range(8))
+    mobility=5*(len(legal_moves(board,player))-len(legal_moves(board,opp)))
+    p,o=counts(board)
+    diff=(p-o) if player==1 else (o-p)
+    occupied=p+o
+    return positional + mobility + diff*(2 if occupied>48 else 0.4)
 
+def minimax(board, player, depth, alpha, beta, maximizing_player):
+    moves=legal_moves(board,player)
+    if depth==0 or is_over(board):
+        return evaluate(board, maximizing_player), None
+    if not moves:
+        score,_=minimax(board,3-player,depth-1,alpha,beta,maximizing_player)
+        return score,None
+    if player==maximizing_player:
+        best=-math.inf; best_move=moves[0]
+        for r,c in moves:
+            score,_=minimax(play(board,r,c,player),3-player,depth-1,alpha,beta,maximizing_player)
+            if score>best: best,best_move=score,(r,c)
+            alpha=max(alpha,best)
+            if beta<=alpha: break
+        return best,best_move
+    best=math.inf; best_move=moves[0]
+    for r,c in moves:
+        score,_=minimax(play(board,r,c,player),3-player,depth-1,alpha,beta,maximizing_player)
+        if score<best: best,best_move=score,(r,c)
+        beta=min(beta,best)
+        if beta<=alpha: break
+    return best,best_move
 
-def finish_or_pass():
-    board = st.session_state.board
-    turn = st.session_state.turn
-    if legal_moves(board, turn):
-        return
-    other = WHITE if turn == BLACK else BLACK
-    if legal_moves(board, other):
-        st.session_state.turn = other
-        st.session_state.message = f"{NAMES[turn]}は置ける場所がないのでパス。{NAMES[other]}の番です。"
-    else:
-        st.session_state.finished = True
+def cpu_move(board, level):
+    moves=legal_moves(board,2)
+    if not moves: return None
+    depth={"かんたん":1,"ふつう":3,"強い":4}[level]
+    if level=="かんたん":
+        # A simple but legal move, favoring corners and edges.
+        return max(moves,key=lambda m: WEIGHTS[m[0]][m[1]])
+    return minimax(board,2,depth,-math.inf,math.inf,2)[1]
 
-
+# ---------- Session state ----------
 if "board" not in st.session_state:
-    reset()
+    st.session_state.board=initial_board()
+    st.session_state.turn=1
+    st.session_state.mode="CPUと対戦"
+    st.session_state.level="ふつう"
+    st.session_state.history=[]
+    st.session_state.message="あなた（黒）の番です。"
+    st.session_state.finished=False
 
-# Keep the board readable on narrow phone screens.
+# ---------- Styling ----------
 st.markdown("""
 <style>
-    .block-container {max-width: 680px; padding: 1.2rem 0.65rem 2rem 0.65rem;}
-    h1 {font-size: clamp(1.8rem, 7vw, 2.6rem) !important; margin-bottom: .2rem !important;}
-    .st-key-board [data-testid="stHorizontalBlock"] {
-        display: grid !important;
-        grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
-        gap: 3px !important;
-        width: 100% !important;
-    }
-    .st-key-board [data-testid="column"] {
-        width: auto !important; min-width: 0 !important; flex: none !important;
-    }
-    .st-key-board [data-testid="stButton"] {width: 100%;}
-    .st-key-board [data-testid="stButton"] button {
-        width: 100%; min-width: 0; height: clamp(36px, 10.4vw, 66px);
-        padding: 0 !important; border-radius: 4px !important;
-        border: 1px solid #174d2b !important; background: #238b45 !important;
-        color: #ffffff !important; font-size: clamp(19px, 6.5vw, 36px) !important;
-        line-height: 1 !important; box-shadow: none !important;
-    }
-    .st-key-board [data-testid="stButton"] button:disabled {
-        opacity: 1 !important; color: #ffffff !important; background: #238b45 !important;
-    }
-    .st-key-board [data-testid="stButton"] button:hover {border-color: #f4d35e !important;}
-    div[data-testid="stMetric"] {padding: .35rem .5rem; background: rgba(128,128,128,.08); border-radius: 10px;}
-    .turn-banner {padding: .75rem 1rem; border-radius: 12px; background: rgba(60,130,220,.15); font-weight: 600;}
+.block-container {max-width: 680px; padding-top: 1.2rem; padding-bottom: 2rem;}
+.game-title {font-size: clamp(1.8rem, 6vw, 2.6rem); font-weight: 800; text-align:center; margin:.2rem 0 .2rem;}
+.game-sub {text-align:center; color:#aeb8b1; margin-bottom:1rem;}
+.score-wrap {display:flex; gap:10px; margin:12px 0;}
+.score-card {flex:1; background:#202b24; border:1px solid #35513d; border-radius:14px; padding:10px 14px; text-align:center;}
+.score-label {font-size:.9rem; opacity:.85;}
+.score-num {font-size:2rem; font-weight:800; line-height:1.15;}
+.turn-box {background:#203044; border-radius:12px; padding:12px 14px; text-align:center; margin:12px 0 14px; font-weight:650;}
+.board-frame {background:#155b32; border:5px solid #104525; border-radius:10px; padding:5px;}
+.stButton > button {border-radius:7px; min-height:0; padding:0; font-size:clamp(16px, 4.2vw, 28px); line-height:1; aspect-ratio:1 / 1; width:100%; border:1px solid #2d7745; background:#238447; color:white;}
+.stButton > button:hover {border-color:#f5d76e; color:white; background:#2b9652;}
+div[data-testid="stHorizontalBlock"] {gap:3px !important;}
+div[data-testid="stHorizontalBlock"] > div {min-width:0 !important;}
+div[data-testid="stButton"] {width:100%;}
+div[data-testid="stButton"] button:focus {border:2px solid #f5d76e; color:white;}
+@media (max-width:480px) { .block-container {padding-left:.45rem; padding-right:.45rem;} .stButton > button {font-size:18px;} }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚫ オセロ")
-st.caption("黒からスタート。緑の盤面の点が置ける場所だよ。")
+st.markdown('<div class="game-title">⚫ オセロ</div>', unsafe_allow_html=True)
+st.markdown('<div class="game-sub">置けるマスをタップしてね</div>', unsafe_allow_html=True)
 
-board = st.session_state.board
-turn = st.session_state.turn
-moves = legal_moves(board, turn)
+# Settings
+with st.expander("⚙️ 対戦設定", expanded=False):
+    mode = st.radio("対戦相手", ["CPUと対戦", "2人で対戦"], horizontal=True,
+                    index=0 if st.session_state.mode=="CPUと対戦" else 1)
+    level = st.select_slider("CPUの強さ", options=["かんたん","ふつう","強い"], value=st.session_state.level,
+                             disabled=(mode!="CPUと対戦"))
+    if mode != st.session_state.mode or level != st.session_state.level:
+        st.session_state.mode=mode; st.session_state.level=level
+        st.session_state.board=initial_board(); st.session_state.turn=1
+        st.session_state.history=[]; st.session_state.message="あなた（黒）の番です。"; st.session_state.finished=False
+        st.rerun()
 
-if not st.session_state.finished and not moves:
-    finish_or_pass()
+b=st.session_state.board
+black,white=counts(b)
+a,bscore=black,white
+st.markdown(f'''<div class="score-wrap">
+<div class="score-card"><div class="score-label">⚫ 黒 {'（あなた）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{a}</div></div>
+<div class="score-card"><div class="score-label">⚪ 白 {'（CPU）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{bscore}</div></div>
+</div>''', unsafe_allow_html=True)
+
+turn=st.session_state.turn
+if not st.session_state.finished and not legal_moves(b,turn):
+    if not legal_moves(b,3-turn):
+        st.session_state.finished=True
+    else:
+        st.session_state.message=f"{'黒' if turn==1 else '白'}は置ける場所がないためパスです。"
+        st.session_state.turn=3-turn
+        st.rerun()
+
+if st.session_state.finished or is_over(st.session_state.board):
+    st.session_state.finished=True
+    black,white=counts(st.session_state.board)
+    if black>white: result="黒の勝ち！"
+    elif white>black: result="白の勝ち！"
+    else: result="引き分け！"
+    st.markdown(f'<div class="turn-box">🏁 {result}　最終結果：黒 {black} − 白 {white}</div>',unsafe_allow_html=True)
+else:
+    player=st.session_state.turn
+    if st.session_state.mode=="CPUと対戦":
+        turn_text="あなた（黒）の番" if player==1 else "CPU（白）が考えています…"
+    else:
+        turn_text="黒の番" if player==1 else "白の番"
+    st.markdown(f'<div class="turn-box">{turn_text}</div>',unsafe_allow_html=True)
+
+# Board buttons
+valid=set(legal_moves(st.session_state.board,st.session_state.turn))
+for r in range(8):
+    cols=st.columns(8, gap="small")
+    for c in range(8):
+        val=st.session_state.board[r][c]
+        if val==1: label="⚫"
+        elif val==2: label="⚪"
+        elif (r,c) in valid: label="·"
+        else: label=" "
+        disabled=(st.session_state.finished or (r,c) not in valid or
+                  (st.session_state.mode=="CPUと対戦" and st.session_state.turn==2))
+        if cols[c].button(label,key=f"cell_{r}_{c}",disabled=disabled,use_container_width=True):
+            st.session_state.history.append(([row[:] for row in st.session_state.board], st.session_state.turn))
+            st.session_state.board=play(st.session_state.board,r,c,st.session_state.turn)
+            st.session_state.turn=3-st.session_state.turn
+            st.session_state.message=""
+            st.rerun()
+
+# CPU plays after user's turn
+if (not st.session_state.finished and st.session_state.mode=="CPUと対戦" and st.session_state.turn==2
+    and legal_moves(st.session_state.board,2)):
+    move=cpu_move(st.session_state.board,st.session_state.level)
+    if move:
+        st.session_state.history.append(([row[:] for row in st.session_state.board], st.session_state.turn))
+        st.session_state.board=play(st.session_state.board,*move,2)
+    st.session_state.turn=1
     st.rerun()
 
-black_n, white_n = count(board)
-score_cols = st.columns(2)
-score_cols[0].metric("⚫ 黒", black_n)
-score_cols[1].metric("⚪ 白", white_n)
+if st.session_state.message and not st.session_state.finished:
+    st.caption(st.session_state.message)
 
-if st.session_state.finished:
-    if black_n > white_n:
-        result = "黒の勝ち！"
-    elif white_n > black_n:
-        result = "白の勝ち！"
-    else:
-        result = "引き分け！"
-    st.success(f"{result}　黒 {black_n} 対 白 {white_n}")
-else:
-    st.markdown(f'<div class="turn-banner">手番：{NAMES[turn]}　｜　{st.session_state.message}</div>', unsafe_allow_html=True)
+c1,c2=st.columns(2)
+with c1:
+    if st.button("↶ 一手戻す",use_container_width=True,disabled=(len(st.session_state.history)==0)):
+        st.session_state.board,st.session_state.turn=st.session_state.history.pop()
+        st.session_state.finished=False; st.rerun()
+with c2:
+    if st.button("🔄 最初から",use_container_width=True):
+        st.session_state.board=initial_board(); st.session_state.turn=1
+        st.session_state.history=[]; st.session_state.message="あなた（黒）の番です。"; st.session_state.finished=False
+        st.rerun()
 
-with st.container(key="board"):
-    for r in range(SIZE):
-        row_cols = st.columns(8, gap=None)
-        for c in range(SIZE):
-            is_legal = (r, c) in moves
-            value = board[r][c]
-            label = "·" if is_legal else GLYPHS[value]
-            if not label:
-                label = "　"
-            with row_cols[c]:
-                if st.button(label, key=f"cell_{r}_{c}", disabled=(st.session_state.finished or not is_legal), use_container_width=True):
-                    flips = flips_for(st.session_state.board, r, c, st.session_state.turn)
-                    if flips:
-                        st.session_state.board[r][c] = st.session_state.turn
-                        for rr, cc in flips:
-                            st.session_state.board[rr][cc] = st.session_state.turn
-                        st.session_state.turn = WHITE if st.session_state.turn == BLACK else BLACK
-                        st.session_state.message = f"{NAMES[st.session_state.turn]}の番です。"
-                        finish_or_pass()
-                    st.rerun()
-
-st.button("↻ 最初からやり直す", on_click=reset, use_container_width=True)
-with st.expander("遊び方"):
-    st.write("・黒と白が交互に打ちます。")
-    st.write("・相手の石を自分の石で挟める場所に置けます。")
-    st.write("・挟んだ石は自分の色に変わります。")
-    st.write("・「·」が置ける場所です。置けないときは自動でパスします。")
-    st.write("・両者とも置けなくなったら終了。石が多い方の勝ちです。")
+with st.expander("📖 遊び方"):
+    st.markdown("""
+- 黒が先手、白が後手です。
+- 相手の石を自分の石ではさむと、はさんだ石が自分の色に変わります。
+- 置ける場所がないときは自動でパスします。
+- 盤面が埋まるか、両者とも置けなくなると終了です。
+- CPU対戦ではあなたが黒、CPUが白です。
+""")
