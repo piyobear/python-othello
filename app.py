@@ -1,7 +1,8 @@
 import streamlit as st
 import math
+import time
 
-st.set_page_config(page_title="オセロ", page_icon="⚫", layout="centered")
+st.set_page_config(page_title="ひよこオセロ", page_icon="🐥", layout="wide")
 
 # ---------- Game engine ----------
 N = 8
@@ -110,27 +111,30 @@ if "board" not in st.session_state:
 # ---------- Styling ----------
 st.markdown("""
 <style>
-.block-container {max-width: 680px; padding-top: 1.2rem; padding-bottom: 2rem;}
-.game-title {font-size: clamp(1.8rem, 6vw, 2.6rem); font-weight: 800; text-align:center; margin:.2rem 0 .2rem;}
-.game-sub {text-align:center; color:#aeb8b1; margin-bottom:1rem;}
-.score-wrap {display:flex; gap:10px; margin:12px 0;}
-.score-card {flex:1; background:#202b24; border:1px solid #35513d; border-radius:14px; padding:10px 14px; text-align:center;}
-.score-label {font-size:.9rem; opacity:.85;}
-.score-num {font-size:2rem; font-weight:800; line-height:1.15;}
-.turn-box {background:#203044; border-radius:12px; padding:12px 14px; text-align:center; margin:12px 0 14px; font-weight:650;}
-.board-frame {background:#155b32; border:5px solid #104525; border-radius:10px; padding:5px;}
-.stButton > button {border-radius:7px; min-height:0; padding:0; font-size:clamp(16px, 4.2vw, 28px); line-height:1; aspect-ratio:1 / 1; width:100%; border:1px solid #2d7745; background:#238447; color:white;}
-.stButton > button:hover {border-color:#f5d76e; color:white; background:#2b9652;}
-div[data-testid="stHorizontalBlock"] {gap:3px !important;}
+:root { color-scheme: light; }
+.stApp {background:#fbf7ed; color:#26382b;}
+.block-container {max-width:100vw !important; padding:.55rem .22rem 1.2rem !important;}
+.game-title {font-size:clamp(1.8rem,7vw,2.7rem);font-weight:900;text-align:center;color:#294b35;margin:.15rem 0 0;letter-spacing:.04em;}
+.game-sub {text-align:center;color:#718071;font-size:.92rem;margin:0 0 .7rem;}
+.score-wrap {display:flex;gap:9px;margin:8px 0 10px;}
+.score-card {flex:1;background:#fffdf7;border:1.5px solid #e5ddc9;border-radius:17px;padding:8px 5px;text-align:center;box-shadow:0 2px 8px #4b57300c;}
+.score-label {font-size:clamp(.76rem,3.2vw,.95rem);color:#526454;font-weight:700;}
+.score-num {font-size:clamp(1.7rem,7vw,2.35rem);font-weight:900;line-height:1.1;color:#26382b;}
+.turn-box {background:#e8efe4;border:1px solid #d3e0d0;color:#294b35;border-radius:14px;padding:10px 8px;text-align:center;margin:8px 0 10px;font-weight:800;font-size:1rem;}
+.stButton {width:100%;}
+.stButton > button {width:100%;aspect-ratio:1/1;min-height:0;padding:0;border-radius:5px;border:1px solid #2d7045;background:#2e804b;color:#fff;font-size:clamp(13px,4.7vw,31px);line-height:1;box-shadow:inset 0 1px 0 #ffffff22;}
+.stButton > button:hover {border-color:#f1ca62;background:#398e56;color:white;}
+.stButton > button:disabled {opacity:1;color:#fff;background:#2e804b;border-color:#286b40;}
+div[data-testid="stHorizontalBlock"] {gap:2px !important;margin-bottom:2px;}
 div[data-testid="stHorizontalBlock"] > div {min-width:0 !important;}
-div[data-testid="stButton"] {width:100%;}
-div[data-testid="stButton"] button:focus {border:2px solid #f5d76e; color:white;}
-@media (max-width:480px) { .block-container {padding-left:.45rem; padding-right:.45rem;} .stButton > button {font-size:18px;} }
+div[data-testid="stButton"] button:focus {border:2px solid #e8bd4d;color:white;}
+[data-testid="stExpander"] {background:#fffdf7;border:1px solid #e5ddc9;border-radius:12px;}
+@media(max-width:480px){.block-container{padding-left:.12rem!important;padding-right:.12rem!important}.score-wrap{gap:6px}.score-card{padding:7px 3px}.turn-box{padding:9px 5px}.stButton > button{border-radius:4px;font-size:clamp(12px,4.6vw,20px)}}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="game-title">⚫ オセロ</div>', unsafe_allow_html=True)
-st.markdown('<div class="game-sub">置けるマスをタップしてね</div>', unsafe_allow_html=True)
+st.markdown('<div class="game-title">🐥 ひよこオセロ 🐣</div>', unsafe_allow_html=True)
+st.markdown('<div class="game-sub">黒ひよこ vs 白ひよこ ・ 置けるマスをタップ！</div>', unsafe_allow_html=True)
 
 # Settings
 with st.expander("⚙️ 対戦設定", expanded=False):
@@ -148,8 +152,8 @@ b=st.session_state.board
 black,white=counts(b)
 a,bscore=black,white
 st.markdown(f'''<div class="score-wrap">
-<div class="score-card"><div class="score-label">⚫ 黒 {'（あなた）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{a}</div></div>
-<div class="score-card"><div class="score-label">⚪ 白 {'（CPU）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{bscore}</div></div>
+<div class="score-card"><div class="score-label">🐥 黒ひよこ {'（あなた）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{a}</div></div>
+<div class="score-card"><div class="score-label">🐣 白ひよこ {'（CPU）' if st.session_state.mode=='CPUと対戦' else ''}</div><div class="score-num">{bscore}</div></div>
 </div>''', unsafe_allow_html=True)
 
 turn=st.session_state.turn
@@ -167,14 +171,14 @@ if st.session_state.finished or is_over(st.session_state.board):
     if black>white: result="黒の勝ち！"
     elif white>black: result="白の勝ち！"
     else: result="引き分け！"
-    st.markdown(f'<div class="turn-box">🏁 {result}　最終結果：黒 {black} − 白 {white}</div>',unsafe_allow_html=True)
+    st.markdown(f'<div class="turn-box">🏁 {result}　🐥 {black} − 🐣 {white}</div>',unsafe_allow_html=True)
 else:
     player=st.session_state.turn
     if st.session_state.mode=="CPUと対戦":
         turn_text="あなた（黒）の番" if player==1 else "CPU（白）が考えています…"
     else:
         turn_text="黒の番" if player==1 else "白の番"
-    st.markdown(f'<div class="turn-box">{turn_text}</div>',unsafe_allow_html=True)
+    st.markdown(f'<div class="turn-box">{turn_text.replace("黒", "🐥 黒").replace("白", "🐣 白")}</div>',unsafe_allow_html=True)
 
 # Board buttons
 valid=set(legal_moves(st.session_state.board,st.session_state.turn))
@@ -182,8 +186,8 @@ for r in range(8):
     cols=st.columns(8, gap="small")
     for c in range(8):
         val=st.session_state.board[r][c]
-        if val==1: label="⚫"
-        elif val==2: label="⚪"
+        if val==1: label="🐥"
+        elif val==2: label="🐣"
         elif (r,c) in valid: label="·"
         else: label=" "
         disabled=(st.session_state.finished or (r,c) not in valid or
@@ -198,7 +202,10 @@ for r in range(8):
 # CPU plays after user's turn
 if (not st.session_state.finished and st.session_state.mode=="CPUと対戦" and st.session_state.turn==2
     and legal_moves(st.session_state.board,2)):
-    move=cpu_move(st.session_state.board,st.session_state.level)
+    # Give the player a moment to see the thinking state before the CPU moves.
+    with st.spinner("CPUが考えています…"):
+        time.sleep(2.0)
+        move=cpu_move(st.session_state.board,st.session_state.level)
     if move:
         st.session_state.history.append(([row[:] for row in st.session_state.board], st.session_state.turn))
         st.session_state.board=play(st.session_state.board,*move,2)
@@ -221,8 +228,8 @@ with c2:
 
 with st.expander("📖 遊び方"):
     st.markdown("""
-- 黒が先手、白が後手です。
-- 相手の石を自分の石ではさむと、はさんだ石が自分の色に変わります。
+- 黒ひよこが先手、白ひよこが後手です。
+- 相手のひよこを自分のひよこではさむと、はさんだひよこが自分の色に変わります。
 - 置ける場所がないときは自動でパスします。
 - 盤面が埋まるか、両者とも置けなくなると終了です。
 - CPU対戦ではあなたが黒、CPUが白です。
